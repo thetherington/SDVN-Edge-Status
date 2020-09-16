@@ -1,0 +1,199 @@
+<style>
+    table.fixed_header_status {
+        width: 100%;
+        table-layout: fixed;
+        border-collapse: collapse;
+        font-size: 90%;
+    }
+
+    tbody.fixed_header_status {
+        display: block;
+        width: 100%;
+        overflow: auto;
+        height: 220px;
+    }
+
+    .fixed_header_status thead tr {
+        display: block;
+    }
+
+    tr.fixed_header_status:nth-child(even) {
+        background-color: #22222275;
+    }
+
+    tr.fixed_header_status:hover {
+        border: 1px solid gray;
+    }
+
+    .fixed_header_status thead {
+        background-color: #222222;
+    }
+
+    th.status_name,
+    td.status_name {
+        padding: 2px;
+        text-align: left;
+        width: 160px;
+    }
+
+    th.status_type,
+    td.status_type {
+        padding: 2px;
+        text-align: center;
+        width: 150px;
+    }
+
+    th.severity,
+    td.severity {
+        padding: 2px;
+        text-align: center;
+        width: 120px;
+    }
+
+    th.issues,
+    td.issues {
+        padding: 2px;
+        text-align: center;
+        width: 350px;
+    }
+
+    th.time,
+    td.time {
+        padding: 2px;
+        text-align: center;
+        width: 180px;
+    }
+
+    div.toolstip_status {
+        position: relative;
+        display: inline-block;
+    }
+
+    div.toolstip_status .tooltiptext_status {
+        visibility: hidden;
+        width: 120px;
+        background-color: #555;
+        color: #fff;
+        text-align: center;
+        border-radius: 6px;
+        padding: 5px 0;
+        position: absolute;
+        z-index: 1;
+        top: 145%;
+        left: 50%;
+        margin-left: -60px;
+        opacity: 0;
+        transition: opacity 0.3s;
+        font-size: 10px;
+    }
+
+    div.toolstip_status .tooltiptext_status::after {
+        content: "";
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        margin-left: -5px;
+        border-width: 5px;
+        border-style: solid;
+        border-color: transparent transparent #555 transparent;
+    }
+
+    div.toolstip_status:hover .tooltiptext_status {
+        visibility: visible;
+        opacity: 1;
+    }
+</style>
+
+{{#each metrics}}
+<h4>{{value}}</h4>
+<table class="fixed_header_status">
+
+    <thead>
+        <tr>
+            <th class="status_name">IPG</th>
+            <th class="status_type">Type</th>
+            <th class="severity">Severity</th>
+            <th class="issues">Issues</th>
+            <th class="time">Time</th>
+        </tr>
+    </thead>
+
+    <tbody class="fixed_header_status">
+
+        {{#each buckets}}
+
+        <tr class="fixed_header_status">
+
+            <td class="status_name">
+
+                <div class="toolstip_status">
+
+                    <a href="{{metrics.12.value}}" target="_blank">
+                        {{metrics.0.value}}
+                    </a>
+
+                    <span class="tooltiptext_status">
+
+                        {{metrics.7.value}}<br>
+                        {{metrics.8.value}} ({{metrics.11.value}})<br>
+                        <a href="http://{{metrics.9.value}}" target="_blank">
+                            {{metrics.9.value}}
+                        </a><br>
+                        PCR: {{metrics.10.value}}
+
+                    </span>
+
+                </div>
+
+            </td>
+            <td class="status_type">
+                <font style="color: gray; font-size: 9px;">
+                    {{metrics.7.value}}
+                </font>
+            </td>
+
+            <td class="severity">
+
+                <font style="color:{{metrics.2.value}}">
+
+                    {{metrics.1.value}}
+
+                </font>
+
+            </td>
+
+            <td class="issues">
+
+                {{#compare metrics.4.value "<=" 1}}
+
+                {{metrics.5.value}}
+
+                {{/compare}}
+
+                {{#compare metrics.4.value ">=" 2}}
+
+                {{#each metrics.5.raw}}
+
+                {{.}}<br>
+
+                {{/each}}
+
+                {{/compare}}
+
+            </td>
+
+            <td class="time">
+
+                {{metrics.6.value}}
+
+            </td>
+
+        </tr>
+
+        {{/each}}
+
+    </tbody>
+</table>
+
+
+{{/each}}
