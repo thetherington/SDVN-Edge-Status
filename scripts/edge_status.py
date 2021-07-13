@@ -30,9 +30,7 @@ class magnum_cache:
             if ("edge_matches" in key) and value:
                 self.edge_matches.extend(value)
 
-        self.cache_url = "http://{}/proxy/insite/{}/api/-/model/magnum/{}".format(
-            self.insite, self.nature, self.cluster_ip
-        )
+        self.cache_url = "http://{}/proxy/insite/{}/api/-/model/magnum/{}".format(self.insite, self.nature, self.cluster_ip)
 
         self.catalog_cache()
 
@@ -47,14 +45,7 @@ class magnum_cache:
         except Exception as e:
 
             with open("edge_status", "a+") as f:
-                f.write(
-                    str(datetime.datetime.now())
-                    + " --- "
-                    + "magnum_cache_builder"
-                    + "\t"
-                    + str(e)
-                    + "\r\n"
-                )
+                f.write(str(datetime.datetime.now()) + " --- " + "magnum_cache_builder" + "\t" + str(e) + "\r\n")
 
             return None
 
@@ -162,9 +153,7 @@ class status_collector(magnum_cache):
         except Exception as e:
 
             with open("edge_status", "a+") as f:
-                f.write(
-                    str(datetime.datetime.now()) + " --- " + "state_fetch" + "\t" + str(e) + "\r\n"
-                )
+                f.write(str(datetime.datetime.now()) + " --- " + "state_fetch" + "\t" + str(e) + "\r\n")
 
             return None
 
@@ -248,10 +237,7 @@ class status_collector(magnum_cache):
 
                     ## need to get the issue if present OR if the severity is not in
                     ## the known severity list ##
-                    if (
-                        fields["s_status_descr"] != "none"
-                        and fields["s_status_descr"] not in self.suppress_severity
-                    ):
+                    if fields["s_status_descr"] != "none" and fields["s_status_descr"] not in self.suppress_severity:
 
                         # create a url based on the nature in the loop to get the device specific state to know
                         # what the full issue is.
@@ -270,10 +256,7 @@ class status_collector(magnum_cache):
 
                                 # append issues to the list if the status object exists in the key list
                                 # OR if the name key (issue label) is not in the issue list.
-                                if (
-                                    "status" in params.keys()
-                                    and params["name"] not in self.suppress_known_issues
-                                ):
+                                if "status" in params.keys() and params["name"] not in self.suppress_known_issues:
 
                                     if params["name"] not in issues:
                                         issues.append(params["name"])
@@ -290,9 +273,7 @@ class status_collector(magnum_cache):
                             # create some weight to the issue to help sort ipgs based on their severity
                             # and number of issues.  the below implies about maximum of 100 issues for this
                             # to work properly
-                            fields["i_sort_weight"] = (fields["i_severity_code"] * 100) + fields[
-                                "i_num_issues"
-                            ]
+                            fields["i_sort_weight"] = (fields["i_severity_code"] * 100) + fields["i_num_issues"]
 
                             # update the date time to nicer readable string. in a try block because of some
                             # unknowns with what date formats will be received or even if the date is there.
@@ -301,9 +282,7 @@ class status_collector(magnum_cache):
 
                                 try:
 
-                                    fields.update(
-                                        {"s_issue_changed_date": device_state["marks"][date_key]}
-                                    )
+                                    fields.update({"s_issue_changed_date": device_state["marks"][date_key]})
 
                                     for dt_format in [
                                         "%Y-%m-%dT%H:%M:%S.%fZ",
@@ -312,15 +291,11 @@ class status_collector(magnum_cache):
 
                                         try:
 
-                                            dt = datetime.datetime.strptime(
-                                                fields["s_issue_changed_date"], dt_format
-                                            )
+                                            dt = datetime.datetime.strptime(fields["s_issue_changed_date"], dt_format)
 
                                             dt = dt - datetime.timedelta(hours=4)
 
-                                            fields["s_issue_changed_date"] = dt.strftime(
-                                                "%b %d %H:%M:%S EST"
-                                            )
+                                            fields["s_issue_changed_date"] = dt.strftime("%b %d %H:%M:%S EST")
 
                                             break
 
