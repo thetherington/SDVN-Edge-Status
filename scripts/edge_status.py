@@ -1,6 +1,7 @@
 import copy
 import datetime
 import json
+import re
 
 import requests
 import urllib3
@@ -38,7 +39,19 @@ class magnum_cache:
 
         try:
 
-            response = requests.get(self.cache_url, verify=False, timeout=30.0)
+            login = {"username": "admin", "password": "admin"}
+
+            response = requests.post(
+                "https://%s/api/v1/login" % self.insite,
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(login),
+                verify=False,
+                timeout=30.0,
+            ).json()
+
+            otbt = {"otbt-is": response["otbt-is"]}
+
+            response = requests.get(self.cache_url, params=otbt, verify=False, timeout=30.0)
 
             return json.loads(response.text)
 
@@ -57,7 +70,7 @@ class magnum_cache:
 
             self.ipg_db = {}
 
-            for device in cache["magnum"]["magnum-controlled-devices"]:
+            for device in cache["magnum-controlled-devices"]:
 
                 if device["device"] in self.edge_matches:
 
@@ -146,7 +159,19 @@ class status_collector(magnum_cache):
 
         try:
 
-            response = requests.get(url, verify=False, timeout=30.0)
+            login = {"username": "admin", "password": "admin"}
+
+            response = requests.post(
+                "https://%s/api/v1/login" % self.insite,
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(login),
+                verify=False,
+                timeout=30.0,
+            ).json()
+
+            otbt = {"otbt-is": response["otbt-is"]}
+
+            response = requests.get(url, params=otbt, verify=False, timeout=30.0)
 
             return json.loads(response.text)
 
@@ -241,8 +266,10 @@ class status_collector(magnum_cache):
 
                         # create a url based on the nature in the loop to get the device specific state to know
                         # what the full issue is.
-                        device_state_url = "https://{}/proxy/insite/{}/api/-/model/device/{}?collection={}".format(
-                            self.insite, nature, device["host"], self.collection
+                        device_state_url = (
+                            "https://{}/proxy/insite/{}/api/-/model/device/{}/view/device/Issues?collection={}".format(
+                                self.insite, nature, device["host"], self.collection
+                            )
                         )
 
                         device_state = self.state_fetch(device_state_url)
@@ -251,24 +278,66 @@ class status_collector(magnum_cache):
 
                             issues = []
 
-                            # iterate through the "values" to find the issues
-                            for _, params in device_state["values"].items():
+                            try:
 
-                                # append issues to the list if the status object exists in the key list
-                                # OR if the name key (issue label) is not in the issue list.
-                                if "status" in params.keys() and params["name"] not in self.suppress_known_issues:
+                                table = device_state["parts"][-1]["parts"][-1]
 
-                                    if params["name"] not in issues:
-                                        issues.append(params["name"])
+                                for row in table["parts"]:
+                                    if row["type"] == "row":
+
+                                        try:
+
+                                            descr = row["parts"][1]["value"]
+
+                                            # try to remove any extra labeling in the issue description
+                                            if "on host " + device["host"] in descr:
+                                                issues.append(descr.split(" on host")[0])
+
+                                            elif "on " + device["host"] in descr:
+                                                issues.append(descr.split(" on " + device["host"])[0])
+
+                                            else:
+                                                issues.append(descr)
+
+                                        except Exception as e:
+                                            print(e)
+                                            continue
+
+                                # remove issues from the list that are in the suppress configured list
+                                for issue in issues:
+
+                                    if any(x in issue for x in self.suppress_known_issues):
+                                        issues.remove(issue)
+
+                            except Exception:
+                                pass
 
                             # new fields for information about the issues
                             fields.update(
                                 {
                                     "i_num_issues": len(issues),
-                                    "s_issues": ", ".join(issues),
                                     "as_issue_list": issues,
                                 },
                             )
+
+                            # create a new list of issues that are summarized. shrink down the list by removing input numbers.
+                            # shorten the issue desc by removing has or has an or is. remove temperature threshold value.
+                            delete_expressions = [r"[0-9]+\s", r"has an\s", r"has\s", r"\sis", r"\sgreater th[e,a]n degrees"]
+
+                            summary_list = []
+                            for issue in issues:
+
+                                holder = issue
+                                for expression in delete_expressions:
+                                    holder = re.sub(expression, "", holder)
+
+                                # try to group RX and TX seperate alerts together like "RX/TX"
+                                holder = re.sub(r"[R,T]X", "RX/TX", holder)
+
+                                summary_list.append(holder)
+
+                            # convert list to set to remove duplicates then back to a list > sorted
+                            fields.update({"as_summary_issues": sorted(list(set(summary_list)))})
 
                             # create some weight to the issue to help sort ipgs based on their severity
                             # and number of issues.  the below implies about maximum of 100 issues for this
@@ -375,11 +444,11 @@ class status_collector(magnum_cache):
 def main():
 
     params = {
-        "sdvn_natures": ["sdvn-ipg", "sdvn-2"],
-        "insite": "172.16.205.201",
+        "sdvn_natures": ["sdvn-1"],
+        "insite": "172.16.205.77",
         "override": "loaded",
         "verbose": True,
-        "suppress_severity": ["info"],
+        "suppress_severity": ["info", "minor"],
         "suppress_known_issues": [
             "QSFP 3 RX Power",
             "QSFP 3 TX Power",
@@ -391,6 +460,7 @@ def main():
             "nature": "mag-1",
             "cluster_ip": "100.103.224.21",
             "edge_matches": ["570IPG-X19-25G", "3067VIP10G-3G"],
+            # "edge_matches": ["3067VIP10G-3G"],
         },
     }
 
