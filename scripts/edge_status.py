@@ -52,6 +52,7 @@ class magnum_cache:
             otbt = {"otbt-is": response["otbt-is"]}
 
             response = requests.get(self.cache_url, params=otbt, verify=False, timeout=30.0)
+            response.close()
 
             return json.loads(response.text)
 
@@ -172,6 +173,7 @@ class status_collector(magnum_cache):
             otbt = {"otbt-is": response["otbt-is"]}
 
             response = requests.get(url, params=otbt, verify=False, timeout=30.0)
+            response.close()
 
             return json.loads(response.text)
 
@@ -254,7 +256,11 @@ class status_collector(magnum_cache):
                         self.insite, nature, device["host"].replace(".", "-"), self.collection
                     )
 
-                    fields.update({"s_panel_url": panel_url})
+                    issue_url = "https://{}/proxy/insite/{}/device/{}?deviceview=Issues&view=minimal&collection={}".format(
+                        self.insite, nature, device["host"].replace(".", "-"), self.collection
+                    )
+
+                    fields.update({"s_panel_url": panel_url, "s_issue_url": issue_url})
 
                     # gray out the severity color if the suppressed severity if found in the suppression list
                     if fields["s_status_descr"] in self.suppress_severity:
@@ -264,8 +270,7 @@ class status_collector(magnum_cache):
                     ## the known severity list ##
                     if fields["s_status_descr"] != "none" and fields["s_status_descr"] not in self.suppress_severity:
 
-                        # create a url based on the nature in the loop to get the device specific state to know
-                        # what the full issue is.
+                        # create a url based on the nature in the loop to get the device specific alerts
                         device_state_url = (
                             "https://{}/proxy/insite/{}/api/-/model/device/{}/view/device/Issues?collection={}".format(
                                 self.insite, nature, device["host"], self.collection
@@ -346,33 +351,31 @@ class status_collector(magnum_cache):
 
                             # update the date time to nicer readable string. in a try block because of some
                             # unknowns with what date formats will be received or even if the date is there.
+                            try:
 
-                            for date_key in ["issue-changed-new-date", "parameter-date-end"]:
+                                fields.update({"s_issue_changed_date": device["marks"]["issue-changed-new-date"]})
 
-                                try:
+                                for dt_format in [
+                                    "%Y-%m-%dT%H:%M:%S.%fZ",
+                                    "%Y-%m-%dT%H:%M:%SZ",
+                                ]:
 
-                                    fields.update({"s_issue_changed_date": device_state["marks"][date_key]})
+                                    try:
 
-                                    for dt_format in [
-                                        "%Y-%m-%dT%H:%M:%S.%fZ",
-                                        "%Y-%m-%dT%H:%M:%SZ",
-                                    ]:
+                                        dt = datetime.datetime.strptime(fields["s_issue_changed_date"], dt_format)
 
-                                        try:
+                                        # todo: make the time offset configurable for different system regions
+                                        dt = dt - datetime.timedelta(hours=4)
 
-                                            dt = datetime.datetime.strptime(fields["s_issue_changed_date"], dt_format)
+                                        fields["s_issue_changed_date"] = dt.strftime("%b %d %H:%M:%S EST")
 
-                                            dt = dt - datetime.timedelta(hours=4)
+                                        break
 
-                                            fields["s_issue_changed_date"] = dt.strftime("%b %d %H:%M:%S EST")
+                                    except Exception:
+                                        continue
 
-                                            break
-
-                                        except Exception:
-                                            continue
-
-                                except Exception:
-                                    pass
+                            except Exception:
+                                pass
 
                     # update the summarization dictionary
                     if fields["s_status_descr"] not in nature_summary.keys():
