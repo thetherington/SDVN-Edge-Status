@@ -2,6 +2,8 @@ import copy
 import datetime
 import json
 import re
+from itertools import zip_longest
+from threading import Thread
 
 import requests
 import urllib3
@@ -210,6 +212,204 @@ class status_collector(magnum_cache):
 
             return None
 
+    def device_process(self, nature, nature_summary, store, devices, http_session):
+
+        for device in filter(None, devices):
+
+            # load in the device meta from the magnum db based on the device ip
+            # used as a key in the ipg_db cache from the magnum config
+            fields = copy.deepcopy(self.ipg_db[device["host"]])
+
+            # load in information on the severity of the device
+            fields.update(
+                {
+                    "s_status_descr": device["status"]["issue-level-highest"],
+                    "s_status_color": device["status"]["issue-level-highest-label-color"],
+                    "i_num_issues": 0,
+                    "i_severity_code": 0,
+                    "i_sort_weight": 0,
+                    "s_nature": nature,
+                    "s_type": "status",
+                }
+            )
+
+            # update severity code if description exists in dictionary
+            if fields["s_status_descr"] in self.severity.keys():
+                fields["i_severity_code"] = self.severity[fields["s_status_descr"]]
+
+            # generate url to access the device panel in the state collector
+            panel_url = "https://{}/proxy/insite/{}/device/{}?deviceview=Device&view=minimal&collection={}".format(
+                self.insite, nature, device["host"].replace(".", "-"), self.collection
+            )
+
+            issue_url = "https://{}/proxy/insite/{}/device/{}?deviceview=Issues&view=minimal&collection={}".format(
+                self.insite, nature, device["host"].replace(".", "-"), self.collection
+            )
+
+            fields.update({"s_panel_url": panel_url, "s_issue_url": issue_url})
+
+            # gray out the severity color if the suppressed severity if found in the suppression list
+            if fields["s_status_descr"] in self.suppress_severity:
+                fields["s_status_color"] = "rgba(170,170,170,1)"
+
+            ## need to get the issue if present OR if the severity is not in
+            ## the known severity list ##
+            if fields["s_status_descr"] != "none" and fields["s_status_descr"] not in self.suppress_severity:
+
+                # create a url based on the nature in the loop to get the device specific alerts
+                device_state_url = "https://{}/proxy/insite/{}/api/-/model/device/{}/view/device/Issues?collection={}".format(
+                    self.insite, nature, device["host"], self.collection
+                )
+
+                device_state = self.state_fetch(device_state_url, http_session)
+
+                if isinstance(device_state, dict):
+
+                    issues = []
+
+                    try:
+
+                        table = device_state["parts"][-1]["parts"][-1]
+
+                        for row in table["parts"]:
+                            if row["type"] == "row":
+
+                                try:
+
+                                    descr = row["parts"][1]["value"]
+
+                                    # try to remove any extra labeling in the issue description
+                                    if "on host " + device["host"] in descr:
+                                        issues.append(descr.split(" on host")[0])
+
+                                    elif "on " + device["host"] in descr:
+                                        issues.append(descr.split(" on " + device["host"])[0])
+
+                                    else:
+                                        issues.append(descr)
+
+                                except Exception as e:
+                                    print(e)
+                                    continue
+
+                        # remove issues from the list that are in the suppress configured list
+                        for issue in issues:
+
+                            if any(x in issue for x in self.suppress_known_issues):
+                                issues.remove(issue)
+
+                    except Exception:
+                        pass
+
+                    # new fields for information about the issues
+                    fields.update(
+                        {
+                            "i_num_issues": len(issues),
+                            "as_issue_list": issues,
+                        },
+                    )
+
+                    # create a new list of issues that are summarized. shrink down the list by removing input numbers.
+                    # shorten the issue desc by removing has or has an or is. remove temperature threshold value.
+                    delete_expressions = [
+                        r"[0-9]+\s",
+                        r"has an\s",
+                        r"has\s",
+                        r"\sis",
+                        r"\sgreater th[e,a]n degrees",
+                    ]
+
+                    summary_list = []
+                    for issue in issues:
+
+                        holder = issue
+                        for expression in delete_expressions:
+                            holder = re.sub(expression, "", holder)
+
+                        # try to group RX and TX seperate alerts together like "RX/TX"
+                        holder = re.sub(r"[R,T]X", "RX/TX", holder)
+
+                        summary_list.append(holder)
+
+                    # convert list to set to remove duplicates then back to a list > sorted
+                    fields.update({"as_summary_issues": sorted(list(set(summary_list)))})
+
+                    # create some weight to the issue to help sort ipgs based on their severity
+                    # and number of issues.  the below implies about maximum of 100 issues for this
+                    # to work properly
+                    fields["i_sort_weight"] = (fields["i_severity_code"] * 100) + fields["i_num_issues"]
+
+                    # update the date time to nicer readable string. in a try block because of some
+                    # unknowns with what date formats will be received or even if the date is there.
+                    try:
+
+                        fields.update({"s_issue_changed_date": device["marks"]["issue-changed-new-date"]})
+
+                        for dt_format in [
+                            "%Y-%m-%dT%H:%M:%S.%fZ",
+                            "%Y-%m-%dT%H:%M:%SZ",
+                        ]:
+
+                            try:
+
+                                dt = datetime.datetime.strptime(fields["s_issue_changed_date"], dt_format)
+
+                                # todo: make the time offset configurable for different system regions
+                                dt = dt - datetime.timedelta(hours=4)
+
+                                fields["s_issue_changed_date"] = dt.strftime("%b %d %H:%M:%S EST")
+
+                                break
+
+                            except Exception:
+                                continue
+
+                    except Exception:
+                        pass
+
+            # update the summarization dictionary
+            if fields["s_status_descr"] not in nature_summary.keys():
+                nature_summary.update({fields["s_status_descr"]: 1})
+
+            else:
+                nature_summary[fields["s_status_descr"]] += 1
+
+            # complete the annotations if there is a reference of information
+            if self.annotate:
+
+                if fields["s_device_name"] in self.annotate.keys():
+
+                    fields.update(self.annotate[fields["s_device_name"]])
+
+                    # create a terms list that lists which components the device belongs to.
+                    # it doesn't include the pcr name if there are other components, otherwise, the
+                    # pcr name is used. this terms list is used by the handlebars visulizer because it cannot
+                    # use the filters aggregation.
+                    term_list = []
+
+                    if len(self.annotate[fields["s_device_name"]].keys()) > 1:
+
+                        for key, value in self.annotate[fields["s_device_name"]].items():
+                            if key != "PCR":
+
+                                term_list.append(value)
+
+                    else:
+                        term_list.append(fields["PCR"])
+
+                    if len(term_list) > 0:
+                        fields.update({"as_terms": term_list})
+
+            # build the final device document with the full status and
+            # annotations
+            document = {
+                "fields": fields,
+                "host": device["host"],
+                "name": "statusmon",
+            }
+
+            store.append(document)
+
     @property
     def collect(self):
 
@@ -254,210 +454,31 @@ class status_collector(magnum_cache):
                         "type": "summary",
                     }
 
-                    for device in devices["devices"]:
+                    groups = list(
+                        zip_longest(
+                            *[iter([device for device in devices["devices"] if device["host"] in self.ipg_db.keys()])] * 15
+                        )
+                    )
 
-                        # only support the device if it's in the magnum db.
-                        if device["host"] in self.ipg_db.keys():
+                    threads = [
+                        Thread(
+                            target=self.device_process,
+                            args=(
+                                nature,
+                                nature_summary,
+                                documents,
+                                group,
+                                http_session,
+                            ),
+                        )
+                        for group in groups
+                    ]
 
-                            # load in the device meta from the magnum db based on the device ip
-                            # used as a key in the ipg_db cache from the magnum config
-                            fields = copy.deepcopy(self.ipg_db[device["host"]])
+                    for x in threads:
+                        x.start()
 
-                            # load in information on the severity of the device
-                            fields.update(
-                                {
-                                    "s_status_descr": device["status"]["issue-level-highest"],
-                                    "s_status_color": device["status"]["issue-level-highest-label-color"],
-                                    "i_num_issues": 0,
-                                    "i_severity_code": 0,
-                                    "i_sort_weight": 0,
-                                    "s_nature": nature,
-                                    "s_type": "status",
-                                }
-                            )
-
-                            # update severity code if description exists in dictionary
-                            if fields["s_status_descr"] in self.severity.keys():
-                                fields["i_severity_code"] = self.severity[fields["s_status_descr"]]
-
-                            # generate url to access the device panel in the state collector
-                            panel_url = (
-                                "https://{}/proxy/insite/{}/device/{}?deviceview=Device&view=minimal&collection={}".format(
-                                    self.insite, nature, device["host"].replace(".", "-"), self.collection
-                                )
-                            )
-
-                            issue_url = (
-                                "https://{}/proxy/insite/{}/device/{}?deviceview=Issues&view=minimal&collection={}".format(
-                                    self.insite, nature, device["host"].replace(".", "-"), self.collection
-                                )
-                            )
-
-                            fields.update({"s_panel_url": panel_url, "s_issue_url": issue_url})
-
-                            # gray out the severity color if the suppressed severity if found in the suppression list
-                            if fields["s_status_descr"] in self.suppress_severity:
-                                fields["s_status_color"] = "rgba(170,170,170,1)"
-
-                            ## need to get the issue if present OR if the severity is not in
-                            ## the known severity list ##
-                            if fields["s_status_descr"] != "none" and fields["s_status_descr"] not in self.suppress_severity:
-
-                                # create a url based on the nature in the loop to get the device specific alerts
-                                device_state_url = (
-                                    "https://{}/proxy/insite/{}/api/-/model/device/{}/view/device/Issues?collection={}".format(
-                                        self.insite, nature, device["host"], self.collection
-                                    )
-                                )
-
-                                device_state = self.state_fetch(device_state_url, http_session)
-
-                                if isinstance(device_state, dict):
-
-                                    issues = []
-
-                                    try:
-
-                                        table = device_state["parts"][-1]["parts"][-1]
-
-                                        for row in table["parts"]:
-                                            if row["type"] == "row":
-
-                                                try:
-
-                                                    descr = row["parts"][1]["value"]
-
-                                                    # try to remove any extra labeling in the issue description
-                                                    if "on host " + device["host"] in descr:
-                                                        issues.append(descr.split(" on host")[0])
-
-                                                    elif "on " + device["host"] in descr:
-                                                        issues.append(descr.split(" on " + device["host"])[0])
-
-                                                    else:
-                                                        issues.append(descr)
-
-                                                except Exception as e:
-                                                    print(e)
-                                                    continue
-
-                                        # remove issues from the list that are in the suppress configured list
-                                        for issue in issues:
-
-                                            if any(x in issue for x in self.suppress_known_issues):
-                                                issues.remove(issue)
-
-                                    except Exception:
-                                        pass
-
-                                    # new fields for information about the issues
-                                    fields.update(
-                                        {
-                                            "i_num_issues": len(issues),
-                                            "as_issue_list": issues,
-                                        },
-                                    )
-
-                                    # create a new list of issues that are summarized. shrink down the list by removing input numbers.
-                                    # shorten the issue desc by removing has or has an or is. remove temperature threshold value.
-                                    delete_expressions = [
-                                        r"[0-9]+\s",
-                                        r"has an\s",
-                                        r"has\s",
-                                        r"\sis",
-                                        r"\sgreater th[e,a]n degrees",
-                                    ]
-
-                                    summary_list = []
-                                    for issue in issues:
-
-                                        holder = issue
-                                        for expression in delete_expressions:
-                                            holder = re.sub(expression, "", holder)
-
-                                        # try to group RX and TX seperate alerts together like "RX/TX"
-                                        holder = re.sub(r"[R,T]X", "RX/TX", holder)
-
-                                        summary_list.append(holder)
-
-                                    # convert list to set to remove duplicates then back to a list > sorted
-                                    fields.update({"as_summary_issues": sorted(list(set(summary_list)))})
-
-                                    # create some weight to the issue to help sort ipgs based on their severity
-                                    # and number of issues.  the below implies about maximum of 100 issues for this
-                                    # to work properly
-                                    fields["i_sort_weight"] = (fields["i_severity_code"] * 100) + fields["i_num_issues"]
-
-                                    # update the date time to nicer readable string. in a try block because of some
-                                    # unknowns with what date formats will be received or even if the date is there.
-                                    try:
-
-                                        fields.update({"s_issue_changed_date": device["marks"]["issue-changed-new-date"]})
-
-                                        for dt_format in [
-                                            "%Y-%m-%dT%H:%M:%S.%fZ",
-                                            "%Y-%m-%dT%H:%M:%SZ",
-                                        ]:
-
-                                            try:
-
-                                                dt = datetime.datetime.strptime(fields["s_issue_changed_date"], dt_format)
-
-                                                # todo: make the time offset configurable for different system regions
-                                                dt = dt - datetime.timedelta(hours=4)
-
-                                                fields["s_issue_changed_date"] = dt.strftime("%b %d %H:%M:%S EST")
-
-                                                break
-
-                                            except Exception:
-                                                continue
-
-                                    except Exception:
-                                        pass
-
-                            # update the summarization dictionary
-                            if fields["s_status_descr"] not in nature_summary.keys():
-                                nature_summary.update({fields["s_status_descr"]: 1})
-
-                            else:
-                                nature_summary[fields["s_status_descr"]] += 1
-
-                            # complete the annotations if there is a reference of information
-                            if self.annotate:
-
-                                if fields["s_device_name"] in self.annotate.keys():
-
-                                    fields.update(self.annotate[fields["s_device_name"]])
-
-                                    # create a terms list that lists which components the device belongs to.
-                                    # it doesn't include the pcr name if there are other components, otherwise, the
-                                    # pcr name is used. this terms list is used by the handlebars visulizer because it cannot
-                                    # use the filters aggregation.
-                                    term_list = []
-
-                                    if len(self.annotate[fields["s_device_name"]].keys()) > 1:
-
-                                        for key, value in self.annotate[fields["s_device_name"]].items():
-                                            if key != "PCR":
-
-                                                term_list.append(value)
-
-                                    else:
-                                        term_list.append(fields["PCR"])
-
-                                    if len(term_list) > 0:
-                                        fields.update({"as_terms": term_list})
-
-                            # build the final device document with the full status and
-                            # annotations
-                            document = {
-                                "fields": fields,
-                                "host": device["host"],
-                                "name": "statusmon",
-                            }
-
-                            documents.append(document)
+                    for y in threads:
+                        y.join()
 
                     # generate the nature summary doucment and then update the overall summary counters
                     document = {"fields": nature_summary, "host": nature, "name": "statusmon"}
