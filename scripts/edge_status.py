@@ -510,22 +510,21 @@ def main():
 
     params = {
         "sdvn_natures": ["sdvn-1"],
-        "insite": "172.16.205.77",
-        "override": "loaded",
+        "insite": "127.0.0.1",
+        # "override": "loaded",
         "verbose": True,
-        "suppress_severity": ["info", "minor"],
+        "suppress_severity": ["info"],
         "suppress_known_issues": [
             "QSFP 3 RX Power",
             "QSFP 3 TX Power",
             "QSFP 4 RX Power",
             "QSFP 4 TX Power",
         ],
-        "annotate": {"module": "ThirtyRock_PROD_edge_def", "dict": "return_reverselookup"},
+        # "annotate": {"module": "ThirtyRock_PROD_edge_def", "dict": "return_reverselookup"},
         "magnum_cache": {
             "nature": "mag-1",
             "cluster_ip": "100.103.224.21",
             "edge_matches": ["570IPG-X19-25G", "3067VIP10G-3G"],
-            # "edge_matches": ["3067VIP10G-3G"],
         },
     }
 
