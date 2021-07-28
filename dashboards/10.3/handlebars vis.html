@@ -10,7 +10,7 @@
         display: block;
         width: 100%;
         overflow: auto;
-        height: 220px;
+        height: 690px;
     }
 
     .fixed_header_status thead tr {
@@ -29,18 +29,11 @@
         background-color: #222222;
     }
 
-    th.status_name,
-    td.status_name {
-        padding: 2px;
-        text-align: left;
-        width: 160px;
-    }
-
-    th.status_type,
-    td.status_type {
+    th.name,
+    td.name {
         padding: 2px;
         text-align: center;
-        width: 150px;
+        width: 170px;
     }
 
     th.severity,
@@ -79,7 +72,7 @@
         padding: 5px 0;
         position: absolute;
         z-index: 1;
-        top: 145%;
+        bottom: 125%;
         left: 50%;
         margin-left: -60px;
         opacity: 0;
@@ -90,12 +83,12 @@
     div.toolstip_status .tooltiptext_status::after {
         content: "";
         position: absolute;
-        bottom: 100%;
+        top: 100%;
         left: 50%;
         margin-left: -5px;
         border-width: 5px;
         border-style: solid;
-        border-color: transparent transparent #555 transparent;
+        border-color: #555 transparent transparent transparent;
     }
 
     div.toolstip_status:hover .tooltiptext_status {
@@ -104,14 +97,11 @@
     }
 </style>
 
-{{#each metrics}}
-<h4>{{value}}</h4>
 <table class="fixed_header_status">
 
     <thead>
         <tr>
-            <th class="status_name">IPG</th>
-            <th class="status_type">Type</th>
+            <th class="name">IPG</th>
             <th class="severity">Severity</th>
             <th class="issues">Issues</th>
             <th class="time">Time</th>
@@ -120,36 +110,33 @@
 
     <tbody class="fixed_header_status">
 
-        {{#each buckets}}
+        {{#each metrics}}
 
         <tr class="fixed_header_status">
 
-            <td class="status_name">
+            <td class="name">
 
                 <div class="toolstip_status">
 
-                    <a href="{{metrics.12.value}}" target="_blank">
+                    <a href="{{metrics.11.value}}" target="_blank">
                         {{metrics.0.value}}
                     </a>
 
                     <span class="tooltiptext_status">
 
                         {{metrics.7.value}}<br>
-                        {{metrics.8.value}} ({{metrics.11.value}})<br>
+                        {{metrics.8.value}} ({{metrics.10.value}})<br>
                         <a href="http://{{metrics.9.value}}" target="_blank">
                             {{metrics.9.value}}
                         </a><br>
-                        PCR: {{metrics.10.value}}
+                        <a href="{{metrics.12.value}}" target="_blank">
+                            Issues
+                        </a>
 
                     </span>
 
                 </div>
 
-            </td>
-            <td class="status_type">
-                <font style="color: gray; font-size: 9px;">
-                    {{metrics.7.value}}
-                </font>
             </td>
 
             <td class="severity">
@@ -164,21 +151,12 @@
 
             <td class="issues">
 
-                {{#compare metrics.4.value "<=" 1}}
+                {{#compare metrics.4.value "<=" 1}} {{metrics.5.value}} {{/compare}} {{#compare metrics.4.value ">=" 2}}
+                    {{#each metrics.5.raw}} {{.}}<br>
 
-                {{metrics.5.value}}
+                    {{/each}}
 
-                {{/compare}}
-
-                {{#compare metrics.4.value ">=" 2}}
-
-                {{#each metrics.5.raw}}
-
-                {{.}}<br>
-
-                {{/each}}
-
-                {{/compare}}
+                    {{/compare}}
 
             </td>
 
@@ -194,6 +172,3 @@
 
     </tbody>
 </table>
-
-
-{{/each}}
